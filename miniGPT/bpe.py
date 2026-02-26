@@ -4,7 +4,7 @@ import torch
 import os
 import json
 import regex as re
-
+import requests
 
 def bytes_to_unicode():
     """
@@ -135,4 +135,34 @@ class Encoder():
         token_bytes = bytearray([self.byte_decoder[c] for c in tokens_flat])
         text = token_bytes.decode("utf-8", errors='replace')
         return text
+
+def get_file(local_file, remote_file):
+    if not os.path.isfile(local_file):
+        print(f"downloading {remote_file} to {local_file}")
+        response = requests.get(remote_file)
+        open(local_file, 'wb').write(response.content)
+
+def get_encoder():
+    home_dir = os.path.expanduser('~')
+    cache_dir = os.path.join(home_dir, '.minigpt')
+    os.makedirs(cache_dir, exist_ok=True)
+
+    encoder_local_file = os.path.join(cache_dir, 'encoder.json')
+    encoder_remote_file = 'https://openaipublic.blob.core.windows.net/gpt-2/models/124M/encoder.json'
+    get_file(encoder_local_file, encoder_remote_file)
+    with open(encoder_local_file, 'r') as f:
+        encoder = json.load(f)
+    assert len(encoder) == (50000 + 256 + 1)
+
+    vocab_local_file = os.path.join(cache_dir, 'vocab.bpe')
+    vocab_remote_file = 'https://openaipublic.blob.core.windows.net/gpt-2/models/124M/vocab.bpe'
+    get_file(vocab_local_file, vocab_remote_file)
+    with open(vocab_local_file, 'r') as f:
+        bpe_data = f.read()
+
+    bpe_merges = [tuple(merge_str.split()) for merge_str in bpe_data.split('\n')[1:-1]]
+    assert len(bpe_merges) == 50000
+
+    encoder = Encoder(encoder, bpe_merges)
+    return encoder
 
