@@ -1,5 +1,3 @@
-from secrets import token_bytes
-
 import torch
 import os
 import json
@@ -51,7 +49,7 @@ class Encoder():
         if token in self.cache:
             return self.cache[token]
 
-        word = tuple(token)
+        word = tuple(token)  # eg (w, o, r, d)
         pairs = get_pairs(word)
 
         # token 只有单个字符
@@ -165,4 +163,38 @@ def get_encoder():
 
     encoder = Encoder(encoder, bpe_merges)
     return encoder
+
+class BPETokenizer:
+    def __init__(self):
+        self.encoder = get_encoder()
+
+    def __call__(self, text, return_tensors="pt"):
+        assert return_tensors == "pt"
+        assert isinstance(text, str)
+
+        idx = [self.encoder.encode(text)]
+        out = torch.tensor(idx, dtype=torch.long)
+        return out
+
+    def decode(self, idx):
+        assert idx.ndim == 1
+
+        text = self.encoder.decode(idx)
+        return text
+
+if __name__ == "__main__":
+    text = "Hello! This is minigpt."
+    encoder = get_encoder()
+    result = encoder.encode_and_show_word(text)
+
+    print("raw string:", text)
+    print("result tokens", result["tokens"])
+
+    for part in result["parts"]:
+        print(part)
+
+    print("bpe_idx", result["bpe_idx"])
+
+
+
 
