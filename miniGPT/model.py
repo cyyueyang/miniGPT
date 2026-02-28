@@ -88,7 +88,7 @@ class GPT(nn.Module):
         C.n_embd = None
         C.block_size = None
         C.vocab_size = None
-
+        C.multiple_of = 256
         return C
 
     def __init__(self, config: CfgNode):
@@ -105,19 +105,19 @@ class GPT(nn.Module):
         if type_given:
             config.merge_from_dict({
                 # GPT-1
-                'openai-gpt': dict(n_layer=12, n_head=12, n_embd=768),  # 117M params
+                'openai-gpt': dict(n_layer=12, n_head=12, n_embd=768, multiple_of=256),  # 117M params
                 # GPT-2 configs
-                'gpt2': dict(n_layer=12, n_head=12, n_embd=768),  # 124M params   和 上面配置相同 参数量不同的原因是因为 词表不同
-                'gpt2-medium': dict(n_layer=24, n_head=16, n_embd=1024),  # 350M params
-                'gpt2-large': dict(n_layer=36, n_head=20, n_embd=1280),  # 774M params
-                'gpt2-xl': dict(n_layer=48, n_head=25, n_embd=1600),  # 1558M params
+                'gpt2': dict(n_layer=12, n_head=12, n_embd=768, multiple_of=256),  # 124M params   和 上面配置相同 参数量不同的原因是因为 词表不同
+                'gpt2-medium': dict(n_layer=24, n_head=16, n_embd=1024, multiple_of=256),  # 350M params
+                'gpt2-large': dict(n_layer=36, n_head=20, n_embd=1280, multiple_of=256),  # 774M params
+                'gpt2-xl': dict(n_layer=48, n_head=25, n_embd=1600, multiple_of=256),  # 1558M params
                 # Gophers
-                'gopher-44m': dict(n_layer=8, n_head=16, n_embd=512),
+                'gopher-44m': dict(n_layer=8, n_head=16, n_embd=512, multiple_of=256),
                 # (there are a number more...)
                 # I made these tiny models up
-                'gpt-mini': dict(n_layer=6, n_head=6, n_embd=192),
-                'gpt-micro': dict(n_layer=4, n_head=4, n_embd=128),
-                'gpt-nano': dict(n_layer=3, n_head=3, n_embd=48),
+                'gpt-mini': dict(n_layer=6, n_head=6, n_embd=192, multiple_of=256),
+                'gpt-micro': dict(n_layer=4, n_head=4, n_embd=128, multiple_of=256),
+                'gpt-nano': dict(n_layer=3, n_head=3, n_embd=48, multiple_of=256),
             }[config.model_type])
 
         self.transformer = nn.ModuleDict(dict(
@@ -193,7 +193,7 @@ class GPT(nn.Module):
         x = token_emb + position_emb
         for block in self.transformer.h:
             x = block(x)
-        x = self.transformer.lm_head(x)
+        x = self.transformer.norm_f(x)
         logits = self.lm_head(x)
 
         loss = None
@@ -206,7 +206,10 @@ class GPT(nn.Module):
         return logits, loss
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, do_sample=False):
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, do_sample=False, eos_token_id=50256):
+        bs = idx.shape[0]
+        finished = torch.zeros(bs, device=idx.device, dtype=torch.bool)
+
         for _ in range(max_new_tokens):
             idx_cond = idx if idx.size(1) <= self.block_size else idx[:, -self.block_size]
             logits, _ = self.forward(idx_cond)
@@ -218,12 +221,14 @@ class GPT(nn.Module):
 
             probs = F.softmax(logits, dim=-1)
             if do_sample:
-                idx_next = torch.multinomi(probs, num_samples=1)
+                idx_next = torch.multinomial(probs, num_samples=1)
             else:
                 _, idx_next = torch.topk(probs, k=1, dim=-1) # 贪心搜索最大的
-
+            idx_next = torch.where(finished.unsqueeze(-1), eos_token_id, idx_next)
             idx = torch.cat((idx_cond, idx_next), dim=1)
-
+            finished = finished | (idx_next.squeeze(-1) == eos_token_id)
+            if torch.all(finished):
+                break
         return idx
 
 
