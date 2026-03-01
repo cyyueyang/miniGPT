@@ -13,7 +13,14 @@ def set_seed(seed):
     torch.cuda.manual_seed(seed)
 
 def setup_logging(config):
-    pass
+    work_dir = config.system.work_dir
+    os.makedirs(work_dir, exist_ok=True)
+
+    with open(os.path.join(work_dir, 'args.txt'), 'w') as f:
+        f.write(' '.join(sys.argv))
+
+    with open(os.path.join(work_dir, 'config.json'), 'w') as f:
+        f.write(json.dumps(config.to_dict(), indent=4))
 
 class CfgNode:
     def __init__(self, **kwargs):
