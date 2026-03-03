@@ -1,24 +1,23 @@
 import time
 from collections import defaultdict
-from dataclasses import replace
-
 import torch
 from torch.utils.data import DataLoader
-from .utils import CfgNode
+
 
 class Trainer:
+    """GPT 模型训练器"""
+    
     @staticmethod
     def get_default_config():
-        C = CfgNode()
+        C = type('Config', (), {})()
         C.device = "auto"
-        C.num_workers = 4
-        C.max_iters = 5
+        C.num_workers = 0
+        C.max_iters = 1000
         C.batch_size = 16
         C.lr = 3e-4
-        C.betas = (0.9, 0.999)
+        C.betas = (0.9, 0.95)
         C.weight_decay = 0.1
         C.grad_norm_clip = 1.0
-
         return C
 
     def __init__(self, config, model, train_dataset):
@@ -34,11 +33,12 @@ class Trainer:
             self.device = torch.device(config.device)
 
         self.model = self.model.to(self.device)
-        print(f"on {self.device}")
+        print(f"使用设备: {self.device}")
 
-        self.iter_num = 0 # 当前训练步数
-        self.iter_time = 0.0 # 时间基准点
-        self.iter_dt = 0.0 # 单步耗时 一个batch
+        self.iter_num = 0
+        self.iter_time = 0.0
+        self.iter_dt = 0.0
+        self.loss = None
 
     def add_callback(self, onevent, callback):
         self.callbacks[onevent].append(callback)
@@ -54,15 +54,16 @@ class Trainer:
         model, config = self.model, self.config
         self.optimizer = model.configure_optimizers(config)
 
+        # 创建数据加载器，使用无限采样
         train_loader = DataLoader(
             self.train_dataset,
             sampler=torch.utils.data.RandomSampler(
                 self.train_dataset,
                 replacement=True,
-                num_samples=int(1e10),
+                num_samples=config.max_iters * config.batch_size,
             ),
             shuffle=False,
-            pin_memory=True,
+            pin_memory=True if self.device.type == 'cuda' else False,
             batch_size=config.batch_size,
             num_workers=config.num_workers,
         )
@@ -76,11 +77,9 @@ class Trainer:
             try:
                 batch = next(data_iter)
             except StopIteration:
-                data_iter = iter(train_loader)
-                batch = next(data_iter)
+                break
 
-            batch = [t.to(self.device) for t in batch]
-
+            batch = [t.to(self.device, non_blocking=True) for t in batch]
             x, y = batch
 
             logits, self.loss = model(x, y)
@@ -97,7 +96,3 @@ class Trainer:
 
             if config.max_iters is not None and self.iter_num >= config.max_iters:
                 break
-
-
-
-
