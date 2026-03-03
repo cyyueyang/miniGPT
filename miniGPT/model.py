@@ -10,6 +10,7 @@ class SwiGLU(nn.Module):
     def __init__(self, config):
         super(SwiGLU, self).__init__()
         hidden_dim = int(config.n_embd * 8 / 3)
+        # 保证hidden_dim 是 multiple_of的倍数 方便硬件加速
         hidden_dim = ((hidden_dim + config.multiple_of - 1) // config.multiple_of) * config.multiple_of
         self.w_gate = nn.Linear(config.n_embd, hidden_dim, bias=False)
         self.w_up = nn.Linear(config.n_embd, hidden_dim, bias=False)
@@ -158,7 +159,7 @@ class GPT(nn.Module):
         decay = set()
         no_decay = set()
         whitelist_weight_modules = (torch.nn.Linear,)
-        blacklist_weight_modules = (RMSNorm, torch.nn.Embedding)
+        blacklist_weight_modules = (torch.nn.Embedding, )
 
         for mn, m in self.named_modules():
             for pn, p in m.named_parameters():
