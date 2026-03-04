@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""GPT 模型推理脚本"""
-
 import os
 import sys
 import argparse

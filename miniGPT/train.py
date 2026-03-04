@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""GPT 模型训练脚本"""
-
 import os
 import sys
 import json
