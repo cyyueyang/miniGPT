@@ -12,6 +12,8 @@ from .bpe import get_encoder
 def preprocess_text_file(input_path, output_path, chunk_size=10000000):
     """预处理文本文件为 token ID 数组
     
+    正确处理 <|endoftext|> 分隔符，确保不会跨块截断
+    
     Args:
         input_path: 输入文本文件路径
         output_path: 输出 .npy 文件路径
@@ -19,6 +21,7 @@ def preprocess_text_file(input_path, output_path, chunk_size=10000000):
     """
     encoder = get_encoder()
     eos_token = 50256
+    separator = "<|endoftext|>"
     
     if os.path.exists(output_path):
         print(f"输出文件已存在: {output_path}")
@@ -32,6 +35,8 @@ def preprocess_text_file(input_path, output_path, chunk_size=10000000):
     print(f"输出文件: {output_path}")
     
     all_tokens = []
+    buffer = ""  # 用于存储不完整的样本（可能包含被截断的分隔符）
+    total_samples = 0
     
     with open(input_path, 'r', encoding='utf-8') as f:
         chunk_num = 0
@@ -41,20 +46,55 @@ def preprocess_text_file(input_path, output_path, chunk_size=10000000):
                 if not chunk:
                     break
                 
-                tokens = encoder.encode(chunk)
-                tokens.append(eos_token)
-                all_tokens.extend(tokens)
+                # 将缓冲区与新读取的块合并
+                buffer += chunk
+                
+                # 查找最后一个完整分隔符的位置
+                # 确保不会在分隔符中间截断
+                last_separator_pos = buffer.rfind(separator)
+                
+                if last_separator_pos == -1:
+                    # 缓冲区中没有完整分隔符，继续读取
+                    pbar.update(len(chunk.encode('utf-8')))
+                    chunk_num += 1
+                    continue
+                
+                # 提取可以安全处理的部分（到最后一个完整分隔符为止）
+                # 包含分隔符，因为分隔符也是样本的一部分
+                process_part = buffer[:last_separator_pos + len(separator)]
+                # 剩余部分保留到缓冲区
+                buffer = buffer[last_separator_pos + len(separator):]
+                
+                # 按分隔符分割样本
+                samples = process_part.split(separator)
+                
+                for sample in samples:
+                    if sample:  # 忽略空字符串
+                        tokens = encoder.encode(sample)
+                        tokens.append(eos_token)
+                        all_tokens.extend(tokens)
+                        total_samples += 1
                 
                 pbar.update(len(chunk.encode('utf-8')))
                 chunk_num += 1
                 
                 if chunk_num % 10 == 0:
-                    print(f"已处理 {chunk_num} 个 chunk, 累计 token 数: {len(all_tokens):,}")
+                    print(f"  已处理 {chunk_num} 个 chunk, 累计样本数: {total_samples:,}, token 数: {len(all_tokens):,}")
+            
+            # 处理文件末尾剩余的缓冲区内容
+            if buffer.strip():
+                # 最后剩余的文本（可能没有以 <|endoftext|> 结尾）
+                tokens = encoder.encode(buffer)
+                tokens.append(eos_token)
+                all_tokens.extend(tokens)
+                total_samples += 1
+                print(f"  处理末尾剩余文本，增加 1 个样本")
     
     token_array = np.array(all_tokens, dtype=np.uint16)
     np.save(output_path, token_array)
     
     print(f"预处理完成!")
+    print(f"总样本数: {total_samples:,}")
     print(f"总 token 数: {len(all_tokens):,}")
     print(f"输出文件大小: {os.path.getsize(output_path) / 1024**3:.2f} GB")
 
